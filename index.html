@@ -1,0 +1,903 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SSH Session Manager</title>
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%23080a11'/%3E%3Crect x='1' y='1' width='30' height='30' rx='5.5' fill='none' stroke='%2300e5a0' stroke-width='1' stroke-opacity='0.3'/%3E%3Crect x='2' y='2' width='28' height='8' rx='3' fill='%23111524'/%3E%3Ccircle cx='7' cy='6' r='1.5' fill='%23ff5f57'/%3E%3Ccircle cx='12' cy='6' r='1.5' fill='%23ffbd2e'/%3E%3Ccircle cx='17' cy='6' r='1.5' fill='%2328ca42'/%3E%3Cpath d='M5 16 L10 20 L5 24' stroke='%2300e5a0' stroke-width='2' stroke-linecap='round' stroke-linejoin='round' fill='none'/%3E%3Cline x1='13' y1='24' x2='22' y2='24' stroke='%2300e5a0' stroke-width='2' stroke-linecap='round' stroke-opacity='0.5'/%3E%3C/svg%3E">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:ital,wght@0,400;0,500;0,600;1,400&family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            display: ['Outfit', 'sans-serif'],
+            mono: ['IBM Plex Mono', 'monospace'],
+          },
+          colors: {
+            ink: {
+              50: '#eef0f6', 100: '#dde1ef', 200: '#bcc3d9', 300: '#909ab9',
+              400: '#7580a8', 500: '#5c6890', 600: '#48526f', 700: '#363d58',
+              800: '#1e2336', 900: '#111524', 950: '#080a11',
+            },
+            neon: { DEFAULT: '#00e5a0', dim: '#00c98c', bright: '#33ffbe' },
+            electric: '#7c6cff',
+          },
+        },
+      },
+    }
+  </script>
+  <style>
+    body {
+      background:
+        radial-gradient(ellipse 80% 50% at 5% -10%, rgba(0,229,160,0.11) 0%, transparent 50%),
+        radial-gradient(ellipse 60% 40% at 95% 110%, rgba(124,108,255,0.09) 0%, transparent 50%),
+        #080a11;
+    }
+    .grain {
+      position: fixed; inset: 0; pointer-events: none; z-index: 50; opacity: 0.02;
+      background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+    }
+    .host-row { transition: all 0.15s cubic-bezier(0.25, 0.46, 0.45, 0.94); }
+    .host-row:hover {
+      transform: translateX(4px);
+      border-left-color: #00e5a0;
+      box-shadow: 0 0 30px rgba(0,229,160,0.08);
+    }
+    .search-input:focus {
+      box-shadow: 0 0 0 1px rgba(0,229,160,0.35), 0 0 20px rgba(0,229,160,0.07);
+    }
+    mark { background: rgba(0,229,160,0.14); color: #33ffbe; border-radius: 2px; padding: 0 1px; }
+    @keyframes fadeUp { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+    @keyframes pulseDot { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    @keyframes slideIn { from { opacity: 0; transform: translateX(32px); } to { opacity: 1; transform: translateX(0); } }
+    @keyframes backdropIn { from { opacity: 0; } to { opacity: 1; } }
+    .animate-in { animation: fadeUp 0.35s ease-out both; }
+    .dot-pulse { animation: pulseDot 2.8s ease-in-out infinite; }
+    .spin svg { animation: spin 0.5s linear infinite; }
+    .drawer { animation: slideIn 0.25s cubic-bezier(0.25, 0.46, 0.45, 0.94) both; }
+    .backdrop { animation: backdropIn 0.2s ease both; }
+    .folder-content {
+      display: grid; grid-template-rows: 1fr;
+      transition: grid-template-rows 0.22s ease, opacity 0.22s ease; opacity: 1;
+    }
+    .folder-content.collapsed { grid-template-rows: 0fr; opacity: 0; }
+    .folder-content > div { overflow: hidden; padding-top: 4px; }
+    .folder-chevron { transition: transform 0.22s ease; }
+    .folder[data-open="true"] .folder-chevron { transform: rotate(90deg); }
+    .folder[data-open="true"] .folder-icon { color: rgba(0,229,160,0.8); }
+    .folder[data-open="true"] .folder-label { color: #ffffff; }
+    .folder[data-open="false"] .folder-icon { color: #5c6890; }
+    .folder[data-open="false"] .folder-label { color: #ffffff; }
+
+    /* Form inputs */
+    .form-input {
+      width: 100%; background: rgba(17,21,36,0.8); border: 1px solid rgba(54,61,88,0.6);
+      border-radius: 8px; padding: 8px 12px; font-size: 12px; color: #bcc3d9;
+      font-family: 'IBM Plex Mono', monospace; outline: none;
+      transition: border-color 0.15s, box-shadow 0.15s;
+    }
+    .form-input:focus {
+      border-color: rgba(0,229,160,0.35);
+      box-shadow: 0 0 0 1px rgba(0,229,160,0.15);
+    }
+    .form-input::placeholder { color: #48526f; }
+    .form-label { font-size: 10px; font-weight: 500; color: #5c6890; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 4px; display: block; }
+    .form-section { margin-bottom: 16px; }
+
+    /* URL row */
+    .url-row { display: flex; gap: 6px; margin-bottom: 6px; align-items: center; }
+    .url-row .form-input { flex: 1; }
+
+    /* Delete confirm */
+    .confirm-overlay { position: absolute; inset: 0; background: rgba(8,10,17,0.92); border-radius: 12px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; z-index: 10; }
+
+    /* Light theme */
+    .light body { background: radial-gradient(ellipse 80% 50% at 5% -10%, rgba(0,200,140,0.07) 0%, transparent 50%), radial-gradient(ellipse 60% 40% at 95% 110%, rgba(124,108,255,0.05) 0%, transparent 50%), #eef0f8; }
+    .light .text-white { color: #0d1019 !important; }
+    .light .text-ink-100 { color: #191d2d !important; }
+    .light .text-ink-200 { color: #282d44 !important; }
+    .light .text-ink-400 { color: #5e678f !important; }
+    .light .text-ink-500 { color: #7e87ab !important; }
+    .light .text-ink-600 { color: #a9afc7 !important; }
+    .light .bg-ink-900\/40 { background: rgba(255,255,255,0.65) !important; }
+    .light .bg-ink-900\/70 { background: rgba(255,255,255,0.88) !important; }
+    .light .bg-ink-800\/50 { background: rgba(215,219,238,0.8) !important; }
+    .light .bg-ink-800\/60 { background: rgba(215,219,238,0.9) !important; }
+    .light .bg-ink-800\/80 { background: rgba(205,210,232,0.9) !important; }
+    .light .bg-ink-800\/40 { background: rgba(215,219,238,0.5) !important; }
+    .light .border-ink-700\/30 { border-color: rgba(126,135,171,0.25) !important; }
+    .light .border-ink-700\/40 { border-color: rgba(126,135,171,0.35) !important; }
+    .light .border-ink-700\/50 { border-color: rgba(126,135,171,0.45) !important; }
+    .light .border-ink-700\/60 { border-color: rgba(126,135,171,0.55) !important; }
+    .light .via-ink-700\/50 { --tw-gradient-via: rgba(126,135,171,0.3); }
+    .light .host-row:hover { border-left-color: #00c98c; box-shadow: 0 0 20px rgba(0,200,140,0.06) !important; }
+    .light .search-input:focus { box-shadow: 0 0 0 1px rgba(0,200,140,0.3), 0 0 16px rgba(0,200,140,0.05) !important; }
+    .light mark { background: rgba(0,200,140,0.15) !important; color: #00875a !important; }
+    .light input::placeholder { color: #9aa3bf !important; }
+    .light .folder[data-open="true"] .folder-label { color: #000000 !important; }
+    .light .folder[data-open="false"] .folder-label { color: #000000 !important; }
+    .light .folder[data-open="false"] .folder-icon { color: #9aa3bf !important; }
+    .light .icon-btn { color: rgba(0,0,0,0.5) !important; }
+    .light .icon-btn:hover { color: #000000 !important; background-color: rgba(0,0,0,0.08) !important; }
+    .light .grain { opacity: 0.01; }
+    .light .text-white { color: #0d1019 !important; }
+    .light .border-ink-600\/60 { border-color: rgba(72,82,111,0.5) !important; }
+    .light .form-input { background: rgba(255,255,255,0.7); border-color: rgba(126,135,171,0.35); color: #191d2d; }
+    .light .form-input:focus { border-color: rgba(0,200,140,0.4); box-shadow: 0 0 0 1px rgba(0,200,140,0.12); }
+    .light .form-input::placeholder { color: #a9afc7; }
+    .light .form-label { color: #7e87ab; }
+  </style>
+  <script>if(localStorage.getItem('ssh-hosts-theme')==='light')document.documentElement.classList.add('light');</script>
+</head>
+<body class="min-h-screen text-ink-200 antialiased font-mono">
+  <div class="grain"></div>
+
+  <div class="relative z-10 px-8 py-12">
+
+    <!-- Header -->
+    <header class="mb-10 animate-in">
+      <div class="flex items-center justify-between gap-3.5 mb-3">
+        <div class="flex items-center gap-3.5">
+          <div class="w-10 h-10 rounded-xl bg-neon/[0.08] border border-neon/[0.15] flex items-center justify-center">
+            <svg class="w-5 h-5 text-neon" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M6.75 7.5l3 2.25-3 2.25m4.5 0h3m-9 8.25h13.5A2.25 2.25 0 0021 18V6a2.25 2.25 0 00-2.25-2.25H5.25A2.25 2.25 0 003 6v12a2.25 2.25 0 002.25 2.25z"/>
+            </svg>
+          </div>
+          <div>
+            <h1 class="font-display text-[1.65rem] font-semibold tracking-tight text-white leading-none">SSH Session Manager</h1>
+            <div class="flex items-center gap-1.5 mt-1.5 text-[11px] text-ink-500">
+              <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M2.25 12.75V12A2.25 2.25 0 014.5 9.75h15A2.25 2.25 0 0121.75 12v.75m-8.69-6.44l-2.12-2.12a1.5 1.5 0 00-1.061-.44H4.5A2.25 2.25 0 002.25 6v12a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18V9a2.25 2.25 0 00-2.25-2.25h-5.379a1.5 1.5 0 01-1.06-.44z"/></svg>
+              <span id="configDir" class="text-ink-400">…</span>
+            </div>
+          </div>
+        </div>
+        <div class="flex items-center gap-2">
+          <button onclick="openGroupModal()" class="flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-medium text-electric bg-electric/[0.08] border border-electric/[0.2] rounded-lg hover:bg-electric/[0.14] hover:border-electric/40 transition-all duration-200">
+            <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15"/></svg>
+            New Group
+          </button>
+          <button onclick="openDrawer()" class="flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-medium text-neon bg-neon/[0.08] border border-neon/[0.2] rounded-lg hover:bg-neon/[0.14] hover:border-neon/40 transition-all duration-200">
+            <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15"/></svg>
+            Add Host
+          </button>
+          <button id="themeBtn" onclick="toggleTheme()" class="group flex items-center gap-1.5 px-2.5 py-1 text-[11px] text-ink-500 border border-ink-700/40 rounded-lg hover:border-neon/25 hover:text-neon/80 transition-all duration-200" title="Toggle theme">
+            <svg id="iconMoon" class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M21.752 15.002A9.718 9.718 0 0118 15.75c-5.385 0-9.75-4.365-9.75-9.75 0-1.33.266-2.597.748-3.752A9.753 9.753 0 003 11.25C3 16.635 7.365 21 12.75 21a9.753 9.753 0 009.002-5.998z"/></svg>
+            <svg id="iconSun" class="w-3.5 h-3.5 hidden" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M12 3v2.25m6.364.386l-1.591 1.591M21 12h-2.25m-.386 6.364l-1.591-1.591M12 18.75V21m-4.773-4.227l-1.591 1.591M5.25 12H3m4.227-4.773L5.636 5.636M15.75 12a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0z"/></svg>
+          </button>
+        </div>
+      </div>
+    </header>
+
+    <!-- Search -->
+    <div class="relative mb-5 animate-in" style="animation-delay:60ms">
+      <div class="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+        <svg class="w-[18px] h-[18px] text-ink-500" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z"/></svg>
+      </div>
+      <input id="search" type="text" placeholder="Search hosts, IPs, users..."
+        class="search-input w-full bg-ink-900/70 backdrop-blur border border-ink-700/50 rounded-xl py-3 pl-11 pr-16 text-sm text-ink-100 placeholder:text-ink-600 outline-none focus:border-neon/25 transition-all duration-200" autofocus>
+      <div class="absolute inset-y-0 right-0 pr-4 flex items-center">
+        <kbd class="hidden sm:inline-flex items-center px-1.5 py-0.5 text-[10px] text-ink-600 bg-ink-800/80 border border-ink-700/60 rounded font-mono">/</kbd>
+      </div>
+    </div>
+
+    <!-- Stats -->
+    <div class="flex items-center justify-between mb-4 animate-in" style="animation-delay:100ms">
+      <span id="statsText" class="text-[11px] text-white"></span>
+      <div class="flex items-center gap-2">
+        <div id="folderActions" class="hidden flex items-center gap-2">
+          <button onclick="expandAll()" class="group flex items-center gap-1.5 px-2.5 py-1 text-[11px] text-white border border-ink-600/60 rounded-lg hover:border-neon/25 hover:text-neon transition-all duration-200" title="Expand all folders">
+            <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M3.75 3.75v4.5m0-4.5h4.5m-4.5 0L9 9M3.75 20.25v-4.5m0 4.5h4.5m-4.5 0L9 15M20.25 3.75h-4.5m4.5 0v4.5m0-4.5L15 9m5.25 11.25h-4.5m4.5 0v-4.5m0 4.5L15 15"/></svg>
+            Expand
+          </button>
+          <button onclick="collapseAll()" class="group flex items-center gap-1.5 px-2.5 py-1 text-[11px] text-white border border-ink-600/60 rounded-lg hover:border-neon/25 hover:text-neon transition-all duration-200" title="Collapse all folders">
+            <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M9 9V4.5M9 9H4.5M9 9 3.75 3.75M9 15v4.5M9 15H4.5M9 15l-5.25 5.25M15 9h4.5M15 9V4.5M15 9l5.25-5.25M15 15h4.5M15 15v4.5m0-4.5 5.25 5.25"/></svg>
+            Collapse
+          </button>
+        </div>
+        <button id="reloadBtn" onclick="reload()" class="group flex items-center gap-1.5 px-2.5 py-1 text-[11px] text-white border border-ink-600/60 rounded-lg hover:border-neon/25 hover:text-neon transition-all duration-200">
+          <svg class="w-3 h-3 transition-transform group-hover:rotate-45 duration-200" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182"/></svg>
+          Reload
+        </button>
+      </div>
+    </div>
+
+    <!-- Divider -->
+    <div class="h-px bg-gradient-to-r from-transparent via-ink-700/50 to-transparent mb-4 animate-in" style="animation-delay:120ms"></div>
+
+    <!-- Host list -->
+    <div id="hostList" class="space-y-1"></div>
+
+  </div>
+
+  <!-- ===================== NEW GROUP MODAL ===================== -->
+  <div id="groupModalBackdrop" class="hidden fixed inset-0 z-40 bg-ink-950/70 backdrop-blur-sm backdrop flex items-center justify-center p-6" onclick="closeGroupModal()">
+    <div class="bg-ink-900 border border-ink-700/50 rounded-2xl shadow-2xl w-full max-w-sm drawer" onclick="event.stopPropagation()">
+
+      <!-- Modal header -->
+      <div class="flex items-center justify-between px-6 py-5 border-b border-ink-700/40">
+        <div>
+          <h2 class="font-display text-base font-semibold text-white">New Group</h2>
+          <p class="text-[11px] text-ink-500 mt-0.5">Creates a new config file</p>
+        </div>
+        <button onclick="closeGroupModal()" class="p-1.5 rounded-lg text-ink-500 hover:text-ink-200 hover:bg-ink-800/60 transition-all">
+          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
+        </button>
+      </div>
+
+      <!-- Modal body -->
+      <div class="px-6 py-5 space-y-4">
+        <div>
+          <label class="form-label">Group Name</label>
+          <input id="gName" class="form-input" placeholder="e.g. work" autocomplete="off">
+          <p id="gPreview" class="text-[10px] text-ink-500 mt-1.5 font-mono"></p>
+        </div>
+        <div id="groupError" class="hidden px-3 py-2 rounded-lg bg-red-500/10 border border-red-500/20 text-[11px] text-red-400"></div>
+      </div>
+
+      <!-- Modal footer -->
+      <div class="px-6 py-4 border-t border-ink-700/40 flex items-center justify-end gap-3">
+        <button onclick="closeGroupModal()" class="px-4 py-2 text-[11px] text-ink-400 border border-ink-700/40 rounded-lg hover:border-ink-600/60 hover:text-ink-200 transition-all duration-200">Cancel</button>
+        <button id="groupSaveBtn" onclick="saveGroup()" class="flex items-center gap-1.5 px-4 py-2 text-[11px] font-medium text-ink-950 bg-electric rounded-lg hover:opacity-90 transition-all duration-200">
+          <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15"/></svg>
+          Create Group
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===================== DRAWER ===================== -->
+  <div id="drawerBackdrop" class="hidden fixed inset-0 z-40 bg-ink-950/70 backdrop-blur-sm backdrop" onclick="closeDrawer()"></div>
+
+  <aside id="drawer" class="hidden fixed top-0 right-0 h-full w-full max-w-md z-50 flex flex-col bg-ink-900 border-l border-ink-700/50 shadow-2xl drawer overflow-y-auto">
+
+    <!-- Drawer header -->
+    <div class="flex items-center justify-between px-6 py-5 border-b border-ink-700/40 flex-shrink-0">
+      <div>
+        <h2 id="drawerTitle" class="font-display text-base font-semibold text-white">Add Host</h2>
+        <p id="drawerSubtitle" class="text-[11px] text-ink-500 mt-0.5">New SSH connection</p>
+      </div>
+      <button onclick="closeDrawer()" class="p-1.5 rounded-lg text-ink-500 hover:text-ink-200 hover:bg-ink-800/60 transition-all">
+        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
+      </button>
+    </div>
+
+    <!-- Drawer body -->
+    <div class="flex-1 px-6 py-5 space-y-4">
+
+      <!-- Config file -->
+      <div class="form-section">
+        <label class="form-label">Config File</label>
+        <div class="relative">
+          <input id="fFile" list="fileList" class="form-input" placeholder="e.g. work.conf" autocomplete="off">
+          <datalist id="fileList"></datalist>
+        </div>
+        <p class="text-[10px] text-ink-600 mt-1">Pick an existing file or type a new filename</p>
+      </div>
+
+      <!-- Divider -->
+      <div class="h-px bg-ink-700/30"></div>
+
+      <!-- Host alias -->
+      <div class="form-section">
+        <label class="form-label">Host Alias <span class="text-red-400">*</span></label>
+        <input id="fName" class="form-input" placeholder="e.g. my-server">
+      </div>
+
+      <!-- Hostname + Port -->
+      <div class="grid grid-cols-3 gap-3 form-section">
+        <div class="col-span-2">
+          <label class="form-label">HostName / IP</label>
+          <input id="fHostname" class="form-input" placeholder="192.168.1.10">
+        </div>
+        <div>
+          <label class="form-label">Port</label>
+          <input id="fPort" class="form-input" placeholder="22">
+        </div>
+      </div>
+
+      <!-- User + IdentityFile -->
+      <div class="form-section">
+        <label class="form-label">User</label>
+        <input id="fUser" class="form-input" placeholder="ubuntu">
+      </div>
+      <div class="form-section">
+        <label class="form-label">IdentityFile</label>
+        <input id="fIdentityFile" class="form-input" placeholder="~/.ssh/id_rsa">
+      </div>
+
+      <!-- Divider -->
+      <div class="h-px bg-ink-700/30"></div>
+
+      <!-- Description + ENV -->
+      <div class="form-section">
+        <label class="form-label">Description</label>
+        <input id="fDescription" class="form-input" placeholder="My production server">
+      </div>
+      <div class="form-section">
+        <label class="form-label">ENV Badge</label>
+        <input id="fEnv" class="form-input" placeholder="PROD / DEV / PAT">
+      </div>
+
+      <!-- Divider -->
+      <div class="h-px bg-ink-700/30"></div>
+
+      <!-- URLs -->
+      <div class="form-section">
+        <div class="flex items-center justify-between mb-2">
+          <label class="form-label mb-0">URLs</label>
+          <button onclick="addUrlRow()" class="text-[10px] text-neon/70 hover:text-neon flex items-center gap-1 transition-colors">
+            <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15"/></svg>
+            Add URL
+          </button>
+        </div>
+        <div id="urlRows" class="space-y-2"></div>
+        <p class="text-[10px] text-ink-600 mt-1">Label and URL for each link badge</p>
+      </div>
+
+    </div>
+
+    <!-- Drawer footer -->
+    <div class="px-6 py-4 border-t border-ink-700/40 flex-shrink-0">
+      <!-- Error message -->
+      <div id="drawerError" class="hidden mb-3 px-3 py-2 rounded-lg bg-red-500/10 border border-red-500/20 text-[11px] text-red-400"></div>
+
+      <div class="flex items-center gap-3">
+        <!-- Delete button (edit mode only) -->
+        <button id="deleteBtn" onclick="confirmDelete()" class="hidden group flex items-center gap-1.5 px-3 py-2 text-[11px] text-red-400 border border-red-400/20 rounded-lg hover:bg-red-400/10 hover:border-red-400/40 transition-all duration-200">
+          <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0"/></svg>
+          Delete
+        </button>
+        <div class="flex-1"></div>
+        <button onclick="closeDrawer()" class="px-4 py-2 text-[11px] text-ink-400 border border-ink-700/40 rounded-lg hover:border-ink-600/60 hover:text-ink-200 transition-all duration-200">
+          Cancel
+        </button>
+        <button id="saveBtn" onclick="saveHost()" class="flex items-center gap-1.5 px-4 py-2 text-[11px] font-medium text-ink-950 bg-neon rounded-lg hover:bg-neon-bright transition-all duration-200">
+          <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5"/></svg>
+          Save Host
+        </button>
+      </div>
+    </div>
+
+    <!-- Delete confirmation overlay -->
+    <div id="deleteConfirm" class="hidden fixed inset-0 z-60 flex items-center justify-center p-6" style="z-index:60">
+      <div class="bg-ink-900 border border-red-500/20 rounded-xl p-6 max-w-sm w-full shadow-2xl text-center">
+        <div class="w-10 h-10 rounded-xl bg-red-500/10 border border-red-500/20 flex items-center justify-center mx-auto mb-3">
+          <svg class="w-5 h-5 text-red-400" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z"/></svg>
+        </div>
+        <p class="text-sm font-display font-semibold text-white mb-1">Delete host?</p>
+        <p id="deleteConfirmName" class="text-[11px] text-ink-400 mb-4"></p>
+        <div class="flex gap-3">
+          <button onclick="cancelDelete()" class="flex-1 px-3 py-2 text-[11px] text-ink-400 border border-ink-700/40 rounded-lg hover:text-ink-200 transition-all">Cancel</button>
+          <button onclick="executeDelete()" class="flex-1 px-3 py-2 text-[11px] font-medium text-white bg-red-500/80 border border-red-500/40 rounded-lg hover:bg-red-500 transition-all">Delete</button>
+        </div>
+      </div>
+    </div>
+
+  </aside>
+
+  <script>
+    let allGroups = [];
+    let openFolders = new Set();
+    let drawerMode = 'add'; // 'add' | 'edit'
+    let editingHost = null; // { host, file }
+
+    // ---------------------------------------------------------------------------
+    // Theme
+    // ---------------------------------------------------------------------------
+    function initTheme() {
+      if (document.documentElement.classList.contains('light')) {
+        document.getElementById('iconMoon').classList.add('hidden');
+        document.getElementById('iconSun').classList.remove('hidden');
+      }
+    }
+    function toggleTheme() {
+      const isLight = document.documentElement.classList.toggle('light');
+      localStorage.setItem('ssh-hosts-theme', isLight ? 'light' : 'dark');
+      document.getElementById('iconMoon').classList.toggle('hidden', isLight);
+      document.getElementById('iconSun').classList.toggle('hidden', !isLight);
+    }
+
+    // ---------------------------------------------------------------------------
+    // Utilities
+    // ---------------------------------------------------------------------------
+    function esc(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+
+    function envBadgeClass(env) {
+      const v = env.toUpperCase();
+      if (/^DEV/.test(v)) return 'text-green-400 bg-green-400/10 border-green-400/20';
+      if (/^SIT/.test(v)) return 'text-orange-400 bg-orange-400/10 border-orange-400/20';
+      if (/^(PAT|DRT)/.test(v)) return 'text-yellow-400 bg-yellow-400/10 border-yellow-400/20';
+      if (/^(PROD|DRP)/.test(v)) return 'text-red-400 bg-red-400/10 border-red-400/20';
+      return 'text-ink-500 bg-ink-800/60 border-ink-700/40';
+    }
+
+    function copyHostname(hostname, btn) {
+      navigator.clipboard.writeText(hostname).then(() => {
+        const icon = btn.querySelector('.copy-icon');
+        const check = btn.querySelector('.check-icon');
+        icon.classList.add('hidden'); check.classList.remove('hidden');
+        setTimeout(() => { icon.classList.remove('hidden'); check.classList.add('hidden'); }, 1500);
+      });
+    }
+
+    function highlight(text, q) {
+      if (!q) return esc(text);
+      const e = q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      return esc(text).replace(new RegExp(`(${e})`, 'gi'), '<mark>$1</mark>');
+    }
+
+    // ---------------------------------------------------------------------------
+    // Folder controls
+    // ---------------------------------------------------------------------------
+    function expandAll() {
+      allGroups.forEach(g => openFolders.add(g.file));
+      document.querySelectorAll('.folder').forEach(f => { f.dataset.open = 'true'; f.querySelector('.folder-content')?.classList.remove('collapsed'); });
+    }
+    function collapseAll() {
+      openFolders.clear();
+      document.querySelectorAll('.folder').forEach(f => { f.dataset.open = 'false'; f.querySelector('.folder-content')?.classList.add('collapsed'); });
+    }
+    function toggleFolder(file) {
+      const nowOpen = !openFolders.has(file);
+      if (nowOpen) openFolders.add(file); else openFolders.delete(file);
+      const folder = document.querySelector(`.folder[data-file="${CSS.escape(file)}"]`);
+      if (!folder) return;
+      folder.dataset.open = nowOpen;
+      folder.querySelector('.folder-content').classList.toggle('collapsed', !nowOpen);
+    }
+
+    // ---------------------------------------------------------------------------
+    // Host row HTML
+    // ---------------------------------------------------------------------------
+    function hostRowHTML(h, file, query, idx) {
+      const target = h.hostname || h.name;
+      const sshUrl = `ssh://${h.user ? h.user + '@' : ''}${target}${h.port && h.port !== '22' ? ':' + h.port : ''}`;
+      const sftpUrl = `sftp://${h.user ? h.user + '@' : ''}${target}${h.port && h.port !== '22' ? ':' + h.port : ''}`;
+      const delay = Math.min(idx * 15, 200);
+      return `
+        <div data-ssh="${esc(sshUrl)}"
+           class="host-row group block rounded-xl bg-ink-900/40 border border-ink-700/30 border-l-2 border-l-transparent hover:bg-ink-800/50 hover:border-ink-700/50 px-4 py-3 cursor-pointer animate-in"
+           style="animation-delay:${delay}ms"
+           onclick="window.location.href=this.dataset.ssh"
+           title="ssh ${h.user ? h.user + '@' : ''}${target}">
+          <div class="flex items-center justify-between gap-3">
+            <div class="flex items-center gap-2 min-w-0 flex-wrap">
+              <span class="flex-shrink-0 w-2 h-2 rounded-full bg-neon dot-pulse"></span>
+              <span class="text-[13px] font-medium text-ink-100 truncate group-hover:text-neon transition-colors duration-150">
+                ${highlight(h.name, query)}
+              </span>
+              <div class="flex-shrink-0 flex items-center gap-0.5" onclick="event.stopPropagation()">
+                <button onclick="copyHostname('${esc(target)}', this)" class="icon-btn p-1 rounded text-neon/60 hover:text-neon hover:bg-neon/10 transition-all duration-150" title="Copy hostname">
+                  <svg class="copy-icon w-4 h-4" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M15.666 3.888A2.25 2.25 0 0013.5 2.25h-3c-1.03 0-1.9.693-2.166 1.638m7.332 0c.055.194.084.4.084.612v0a.75.75 0 01-.75.75H9a.75.75 0 01-.75-.75v0c0-.212.03-.418.084-.612m7.332 0c.646.049 1.288.11 1.927.184 1.1.128 1.907 1.077 1.907 2.185V19.5a2.25 2.25 0 01-2.25 2.25H6.75A2.25 2.25 0 014.5 19.5V6.257c0-1.108.806-2.057 1.907-2.185a48.208 48.208 0 011.927-.184"/></svg>
+                  <svg class="check-icon w-4 h-4 hidden text-green-400" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5"/></svg>
+                </button>
+                <a href="${esc(sshUrl)}" class="icon-btn p-1 rounded text-neon/60 hover:text-neon hover:bg-neon/10 transition-all duration-150" title="Connect via SSH">
+                  <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M6.75 7.5l3 2.25-3 2.25m4.5 0h3m-9 8.25h13.5A2.25 2.25 0 0021 18V6a2.25 2.25 0 00-2.25-2.25H5.25A2.25 2.25 0 003 6v12a2.25 2.25 0 002.25 2.25z"/></svg>
+                </a>
+                <a href="${esc(sftpUrl)}" class="icon-btn p-1 rounded text-neon/60 hover:text-neon hover:bg-neon/10 transition-all duration-150" title="Connect via SFTP">
+                  <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M2.25 12.75V12A2.25 2.25 0 014.5 9.75h15A2.25 2.25 0 0121.75 12v.75m-8.69-6.44l-2.12-2.12a1.5 1.5 0 00-1.061-.44H4.5A2.25 2.25 0 002.25 6v12a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18V9a2.25 2.25 0 00-2.25-2.25h-5.379a1.5 1.5 0 01-1.06-.44z"/></svg>
+                </a>
+                <!-- Edit button -->
+                <button onclick="openDrawer(${JSON.stringify(esc(JSON.stringify(h))).slice(1,-1)}, '${esc(file)}')" class="icon-btn p-1 rounded text-neon/60 hover:text-neon hover:bg-neon/10 transition-all duration-150" title="Edit host">
+                  <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125"/></svg>
+                </button>
+              </div>
+              ${h.description ? `<span class="flex-shrink-0 text-[10px] text-electric bg-electric/10 border border-electric/20 rounded px-1.5 py-0.5 font-mono">${highlight(h.description, query)}</span>` : ''}
+              ${h.env ? `<span class="flex-shrink-0 text-[10px] border rounded px-1.5 py-0.5 font-mono font-semibold tracking-wide ${envBadgeClass(h.env)}">${highlight(h.env, query)}</span>` : ''}
+              ${h.urls && h.urls.length ? h.urls.map(u => `
+                <a href="${esc(u.url)}" target="_blank" rel="noopener noreferrer" onclick="event.stopPropagation()"
+                   class="flex-shrink-0 inline-flex items-center gap-1 text-[10px] text-amber-400 bg-amber-400/10 border border-amber-400/20 rounded px-1.5 py-0.5 font-mono hover:bg-amber-400/20 hover:border-amber-400/40 transition-all duration-150"
+                   title="${esc(u.url)}">
+                  <svg class="w-2.5 h-2.5" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25"/></svg>
+                  ${highlight(u.name, query)}
+                </a>`).join('') : ''}
+            </div>
+            <div class="flex items-center gap-3.5 flex-shrink-0 text-[11px] text-white">
+              ${h.user ? `<span class="hidden sm:flex items-center gap-1"><svg class="w-3 h-3 text-ink-400" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0"/></svg><span>${highlight(h.user, query)}</span></span>` : ''}
+              <span class="flex items-center gap-1">
+                <svg class="w-3 h-3 text-ink-400" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M5.25 14.25h13.5m-13.5 0a3 3 0 01-3-3m3 3a3 3 0 003-3m-3 3v3.75m13.5-3.75a3 3 0 01-3-3m3 3a3 3 0 003-3m-3 3v3.75M3.75 21h16.5M5.25 6.75h13.5"/></svg>
+                <span class="text-white">${highlight(target, query)}</span>
+              </span>
+              ${h.port && h.port !== '22' ? `<span class="text-electric font-medium">:${esc(h.port)}</span>` : ''}
+            </div>
+          </div>
+        </div>`;
+    }
+
+    // ---------------------------------------------------------------------------
+    // Render
+    // ---------------------------------------------------------------------------
+    function renderHosts(query = '') {
+      const list = document.getElementById('hostList');
+      const q = query.toLowerCase().trim();
+      const totalHosts = allGroups.reduce((sum, g) => sum + g.hosts.length, 0);
+
+      const filteredGroups = allGroups.map(g => ({
+        file: g.file,
+        hosts: q ? g.hosts.filter(h =>
+          h.name.toLowerCase().includes(q) ||
+          h.hostname.toLowerCase().includes(q) ||
+          h.user.toLowerCase().includes(q) ||
+          h.description.toLowerCase().includes(q) ||
+          h.env.toLowerCase().includes(q)
+        ) : g.hosts
+      })).filter(g => g.hosts.length > 0);
+
+      const filteredCount = filteredGroups.reduce((sum, g) => sum + g.hosts.length, 0);
+
+      document.getElementById('statsText').textContent = q
+        ? `${filteredCount} of ${totalHosts} hosts`
+        : `${totalHosts} hosts · ${allGroups.length} ${allGroups.length === 1 ? 'file' : 'files'}`;
+      document.getElementById('folderActions').classList.toggle('hidden', allGroups.length <= 1);
+
+      if (totalHosts === 0) {
+        list.innerHTML = `
+          <div class="text-center py-20">
+            <div class="inline-flex w-12 h-12 rounded-xl bg-ink-800/60 border border-ink-700/40 items-center justify-center mb-4">
+              <svg class="w-6 h-6 text-ink-500" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z"/></svg>
+            </div>
+            <p class="text-sm text-ink-400 font-display font-medium">No hosts found</p>
+            <p class="text-[11px] text-ink-600 mt-1">Click <span class="text-neon">+ Add Host</span> to get started</p>
+          </div>`;
+        return;
+      }
+
+      if (filteredGroups.length === 0) {
+        list.innerHTML = `
+          <div class="text-center py-16">
+            <div class="text-ink-600 text-2xl mb-3">⌘</div>
+            <p class="text-sm text-ink-500">No matches for "<span class="text-ink-300">${esc(query)}</span>"</p>
+          </div>`;
+        return;
+      }
+
+      if (q) filteredGroups.forEach(g => openFolders.add(g.file));
+
+      if (allGroups.length === 1) {
+        list.innerHTML = filteredGroups[0].hosts.map((h, i) => hostRowHTML(h, filteredGroups[0].file, query, i)).join('');
+        return;
+      }
+
+      list.innerHTML = filteredGroups.map((g, gi) => {
+        const isOpen = q ? true : openFolders.has(g.file);
+        const gDelay = gi * 40;
+        return `
+          <div class="folder mb-2 animate-in" data-file="${esc(g.file)}" data-open="${isOpen}" style="animation-delay:${gDelay}ms">
+            <button data-folder="${esc(g.file)}" class="folder-btn w-full flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-ink-800/40 transition-colors duration-150">
+              <svg class="folder-chevron w-3 h-3 text-ink-500 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5"/></svg>
+              <svg class="folder-icon w-3.5 h-3.5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M2.25 12.75V12A2.25 2.25 0 014.5 9.75h15A2.25 2.25 0 0121.75 12v.75m-8.69-6.44l-2.12-2.12a1.5 1.5 0 00-1.061-.44H4.5A2.25 2.25 0 002.25 6v12a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18V9a2.25 2.25 0 00-2.25-2.25h-5.379a1.5 1.5 0 01-1.06-.44z"/></svg>
+              <span class="folder-label text-[12px] font-mono font-medium flex-1 text-left truncate">${esc(g.file)}</span>
+              <span class="text-[10px] text-ink-600 font-mono tabular-nums">${g.hosts.length}</span>
+            </button>
+            <div class="folder-content${isOpen ? '' : ' collapsed'}">
+              <div class="pl-5 space-y-1">${g.hosts.map((h, i) => hostRowHTML(h, g.file, query, i)).join('')}</div>
+            </div>
+          </div>`;
+      }).join('');
+    }
+
+    // ---------------------------------------------------------------------------
+    // Drawer — open / close
+    // ---------------------------------------------------------------------------
+    async function openDrawer(hostJson, file) {
+      const backdrop = document.getElementById('drawerBackdrop');
+      const drawer = document.getElementById('drawer');
+
+      // Load file list into datalist
+      try {
+        const files = await fetch('/api/files').then(r => r.json());
+        const dl = document.getElementById('fileList');
+        dl.innerHTML = files.map(f => `<option value="${esc(f)}">`).join('');
+      } catch(e) {}
+
+      if (hostJson && file) {
+        // Edit mode
+        drawerMode = 'edit';
+        const h = typeof hostJson === 'string' ? JSON.parse(hostJson) : hostJson;
+        editingHost = { host: h, file };
+
+        document.getElementById('drawerTitle').textContent = 'Edit Host';
+        document.getElementById('drawerSubtitle').textContent = h.name;
+        document.getElementById('deleteBtn').classList.remove('hidden');
+
+        document.getElementById('fFile').value = file;
+        document.getElementById('fFile').disabled = true;
+        document.getElementById('fName').value = h.name || '';
+        document.getElementById('fHostname').value = h.hostname || '';
+        document.getElementById('fPort').value = h.port || '22';
+        document.getElementById('fUser').value = h.user || '';
+        document.getElementById('fIdentityFile').value = h.identityFile || '';
+        document.getElementById('fDescription').value = h.description || '';
+        document.getElementById('fEnv').value = h.env || '';
+
+        // Populate URL rows
+        document.getElementById('urlRows').innerHTML = '';
+        (h.urls || []).forEach(u => addUrlRow(u.name, u.url));
+      } else {
+        // Add mode
+        drawerMode = 'add';
+        editingHost = null;
+
+        document.getElementById('drawerTitle').textContent = 'Add Host';
+        document.getElementById('drawerSubtitle').textContent = 'New SSH connection';
+        document.getElementById('deleteBtn').classList.add('hidden');
+
+        document.getElementById('fFile').value = '';
+        document.getElementById('fFile').disabled = false;
+        document.getElementById('fName').value = '';
+        document.getElementById('fHostname').value = '';
+        document.getElementById('fPort').value = '';
+        document.getElementById('fUser').value = '';
+        document.getElementById('fIdentityFile').value = '';
+        document.getElementById('fDescription').value = '';
+        document.getElementById('fEnv').value = '';
+        document.getElementById('urlRows').innerHTML = '';
+      }
+
+      document.getElementById('drawerError').classList.add('hidden');
+      backdrop.classList.remove('hidden');
+      drawer.classList.remove('hidden');
+      document.body.style.overflow = 'hidden';
+      setTimeout(() => document.getElementById('fFile').disabled || document.getElementById('fName').focus(), 50);
+    }
+
+    function closeDrawer() {
+      document.getElementById('drawerBackdrop').classList.add('hidden');
+      document.getElementById('drawer').classList.add('hidden');
+      document.getElementById('deleteConfirm').classList.add('hidden');
+      document.body.style.overflow = '';
+    }
+
+    // ---------------------------------------------------------------------------
+    // URL rows
+    // ---------------------------------------------------------------------------
+    function addUrlRow(name = '', url = '') {
+      const row = document.createElement('div');
+      row.className = 'url-row';
+      row.innerHTML = `
+        <input class="form-input url-name" placeholder="Label" value="${esc(name)}" style="flex:0 0 110px">
+        <input class="form-input url-href" placeholder="https://..." value="${esc(url)}">
+        <button onclick="this.parentElement.remove()" class="flex-shrink-0 p-1.5 rounded text-ink-600 hover:text-red-400 hover:bg-red-400/10 transition-all">
+          <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
+        </button>`;
+      document.getElementById('urlRows').appendChild(row);
+    }
+
+    function collectUrls() {
+      return [...document.querySelectorAll('.url-row')].map(row => ({
+        name: row.querySelector('.url-name').value.trim(),
+        url: row.querySelector('.url-href').value.trim(),
+      })).filter(u => u.url);
+    }
+
+    // ---------------------------------------------------------------------------
+    // Save (add or edit)
+    // ---------------------------------------------------------------------------
+    async function saveHost() {
+      const errEl = document.getElementById('drawerError');
+      errEl.classList.add('hidden');
+
+      const file = document.getElementById('fFile').value.trim();
+      const name = document.getElementById('fName').value.trim();
+
+      if (!file) return showDrawerError('Config file is required');
+      if (!name) return showDrawerError('Host alias is required');
+
+      const host = {
+        name,
+        hostname: document.getElementById('fHostname').value.trim(),
+        user: document.getElementById('fUser').value.trim(),
+        port: document.getElementById('fPort').value.trim() || '22',
+        identityFile: document.getElementById('fIdentityFile').value.trim(),
+        description: document.getElementById('fDescription').value.trim(),
+        env: document.getElementById('fEnv').value.trim(),
+        urls: collectUrls(),
+      };
+
+      const btn = document.getElementById('saveBtn');
+      btn.disabled = true;
+      btn.textContent = 'Saving…';
+
+      try {
+        let res;
+        if (drawerMode === 'add') {
+          res = await fetch('/api/hosts', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ file, host }),
+          });
+        } else {
+          res = await fetch(`/api/hosts/${encodeURIComponent(editingHost.file)}/${encodeURIComponent(editingHost.host.name)}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ host }),
+          });
+        }
+        const data = await res.json();
+        if (!res.ok) {
+          showDrawerError(data.error || 'Unknown error');
+        } else {
+          closeDrawer();
+          await reload();
+        }
+      } catch (e) {
+        showDrawerError('Network error — is the server running?');
+      } finally {
+        btn.disabled = false;
+        btn.innerHTML = `<svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5"/></svg> Save Host`;
+      }
+    }
+
+    function showDrawerError(msg) {
+      const el = document.getElementById('drawerError');
+      el.textContent = msg;
+      el.classList.remove('hidden');
+    }
+
+    // ---------------------------------------------------------------------------
+    // Delete
+    // ---------------------------------------------------------------------------
+    function confirmDelete() {
+      document.getElementById('deleteConfirmName').textContent =
+        `"${editingHost.host.name}" from ${editingHost.file} — this cannot be undone.`;
+      document.getElementById('deleteConfirm').classList.remove('hidden');
+    }
+    function cancelDelete() {
+      document.getElementById('deleteConfirm').classList.add('hidden');
+    }
+    async function executeDelete() {
+      try {
+        const res = await fetch(`/api/hosts/${encodeURIComponent(editingHost.file)}/${encodeURIComponent(editingHost.host.name)}`, {
+          method: 'DELETE',
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          cancelDelete();
+          showDrawerError(data.error || 'Delete failed');
+        } else {
+          closeDrawer();
+          await reload();
+        }
+      } catch (e) {
+        showDrawerError('Network error');
+      }
+    }
+
+    // ---------------------------------------------------------------------------
+    // Reload
+    // ---------------------------------------------------------------------------
+    async function reload() {
+      const btn = document.getElementById('reloadBtn');
+      btn.classList.add('spin');
+      try {
+        const res = await fetch('/api/hosts');
+        allGroups = await res.json();
+        openFolders = new Set();
+        renderHosts(document.getElementById('search').value);
+      } catch (e) { console.error('Reload failed:', e); }
+      finally { setTimeout(() => btn.classList.remove('spin'), 400); }
+    }
+
+    // ---------------------------------------------------------------------------
+    // Events
+    // ---------------------------------------------------------------------------
+    document.getElementById('search').addEventListener('input', e => renderHosts(e.target.value));
+
+    document.getElementById('hostList').addEventListener('click', e => {
+      const btn = e.target.closest('.folder-btn');
+      if (btn) toggleFolder(btn.dataset.folder);
+    });
+
+    document.addEventListener('keydown', e => {
+      const s = document.getElementById('search');
+      if (e.key === 'Escape') {
+        if (!document.getElementById('drawer').classList.contains('hidden')) { closeDrawer(); return; }
+        s.value = ''; renderHosts(); s.blur();
+      }
+      if (e.key === '/' && document.activeElement !== s && document.getElementById('drawer').classList.contains('hidden')) {
+        e.preventDefault(); s.focus();
+      }
+    });
+
+    // ---------------------------------------------------------------------------
+    // New Group Modal
+    // ---------------------------------------------------------------------------
+    function openGroupModal() {
+      document.getElementById('gName').value = '';
+      document.getElementById('gPreview').textContent = '';
+      document.getElementById('groupError').classList.add('hidden');
+      document.getElementById('groupModalBackdrop').classList.remove('hidden');
+      document.body.style.overflow = 'hidden';
+      setTimeout(() => document.getElementById('gName').focus(), 50);
+    }
+
+    function closeGroupModal() {
+      document.getElementById('groupModalBackdrop').classList.add('hidden');
+      document.body.style.overflow = '';
+    }
+
+    document.addEventListener('DOMContentLoaded', () => {
+      document.getElementById('gName').addEventListener('input', e => {
+        const val = e.target.value.trim();
+        const preview = document.getElementById('gPreview');
+        if (val) {
+          const filename = val.endsWith('.conf') ? val : `${val}.conf`;
+          preview.textContent = `Will create: ${filename}`;
+          preview.style.color = '';
+        } else {
+          preview.textContent = '';
+        }
+      });
+    });
+
+    async function saveGroup() {
+      const rawName = document.getElementById('gName').value.trim();
+      const errEl = document.getElementById('groupError');
+      errEl.classList.add('hidden');
+
+      if (!rawName) {
+        errEl.textContent = 'Group name is required';
+        errEl.classList.remove('hidden');
+        return;
+      }
+
+      const filename = rawName.endsWith('.conf') ? rawName : `${rawName}.conf`;
+
+      // Check for duplicates client-side
+      const existing = allGroups.map(g => g.file);
+      if (existing.includes(filename)) {
+        errEl.textContent = `Group "${filename}" already exists`;
+        errEl.classList.remove('hidden');
+        return;
+      }
+
+      const btn = document.getElementById('groupSaveBtn');
+      btn.disabled = true;
+      btn.textContent = 'Creating…';
+
+      try {
+        const res = await fetch('/api/files', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ filename }),
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          errEl.textContent = data.error || 'Failed to create group';
+          errEl.classList.remove('hidden');
+        } else {
+          closeGroupModal();
+          await reload();
+        }
+      } catch (e) {
+        errEl.textContent = 'Network error — is the server running?';
+        errEl.classList.remove('hidden');
+      } finally {
+        btn.disabled = false;
+        btn.innerHTML = `<svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15"/></svg> Create Group`;
+      }
+    }
+
+    // ---------------------------------------------------------------------------
+    // Init
+    // ---------------------------------------------------------------------------
+    async function init() {
+      try {
+        const [hostsRes, configRes] = await Promise.all([fetch('/api/hosts'), fetch('/api/config')]);
+        allGroups = await hostsRes.json();
+        openFolders = new Set();
+        const { config_dir } = await configRes.json();
+        document.getElementById('configDir').textContent = config_dir;
+      } catch (e) { console.error('Init failed:', e); }
+      renderHosts();
+    }
+
+    initTheme();
+    init();
+  </script>
+</body>
+</html>
