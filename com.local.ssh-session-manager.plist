@@ -2,33 +2,41 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+
+    <!-- Service identity -->
     <key>Label</key>
     <string>com.local.ssh-session-manager</string>
 
+    <!-- Command to run -->
     <key>ProgramArguments</key>
     <array>
-        <string>/usr/bin/python3</string>
-        <string>/Users/manny/develop/git/development_env/scripts/ssh-session-manager/ssh-session-manager.py</string>
+        <string>/opt/homebrew/opt/python@3.14/Frameworks/Python.framework/Versions/3.14/bin/python3</string>
+        <string>/Users/manny/Applications/ssh-session-manager/ssh-session-manager.py</string>
     </array>
 
+    <!-- Start at login and keep running -->
     <key>RunAtLoad</key>
     <true/>
 
     <key>KeepAlive</key>
     <true/>
 
+    <!-- Logging -->
     <key>StandardOutPath</key>
     <string>/Users/manny/Library/Logs/ssh-session-manager.log</string>
 
     <key>StandardErrorPath</key>
     <string>/Users/manny/Library/Logs/ssh-session-manager.log</string>
 
+    <!-- Environment -->
     <key>EnvironmentVariables</key>
     <dict>
         <key>SSH_CONFIG_DIR</key>
         <string>/Users/manny/.ssh/config.d</string>
+
         <key>SSH_HOSTS_PORT</key>
         <string>8822</string>
     </dict>
+
 </dict>
 </plist>
