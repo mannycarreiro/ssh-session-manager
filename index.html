@@ -482,7 +482,8 @@
                   <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M2.25 12.75V12A2.25 2.25 0 014.5 9.75h15A2.25 2.25 0 0121.75 12v.75m-8.69-6.44l-2.12-2.12a1.5 1.5 0 00-1.061-.44H4.5A2.25 2.25 0 002.25 6v12a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18V9a2.25 2.25 0 00-2.25-2.25h-5.379a1.5 1.5 0 01-1.06-.44z"/></svg>
                 </a>
                 <!-- Edit button -->
-                <button onclick="openDrawer(${JSON.stringify(esc(JSON.stringify(h))).slice(1,-1)}, '${esc(file)}')" class="icon-btn p-1 rounded text-neon/60 hover:text-neon hover:bg-neon/10 transition-all duration-150" title="Edit host">
+                <button data-edit-host="${btoa(unescape(encodeURIComponent(JSON.stringify(h))))}" data-edit-file="${esc(file)}" class="edit-btn icon-btn p-1 rounded text-neon/60 hover:text-neon hover:bg-neon/10 transition-all duration-150" title="Edit host"
+                  onclick="event.stopPropagation(); openDrawer(JSON.parse(decodeURIComponent(escape(atob(this.dataset.editHost)))), this.dataset.editFile)">
                   <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125"/></svg>
                 </button>
               </div>
@@ -597,7 +598,7 @@
       if (hostJson && file) {
         // Edit mode
         drawerMode = 'edit';
-        const h = typeof hostJson === 'string' ? JSON.parse(hostJson) : hostJson;
+        const h = (typeof hostJson === 'string') ? JSON.parse(hostJson) : hostJson;
         editingHost = { host: h, file };
 
         document.getElementById('drawerTitle').textContent = 'Edit Host';
@@ -788,6 +789,14 @@
     document.getElementById('search').addEventListener('input', e => renderHosts(e.target.value));
 
     document.getElementById('hostList').addEventListener('click', e => {
+      const editBtn = e.target.closest('.edit-btn');
+      if (editBtn) {
+        e.stopPropagation();
+        const host = JSON.parse(editBtn.dataset.editHost);
+        const file = editBtn.dataset.editFile;
+        openDrawer(host, file);
+        return;
+      }
       const btn = e.target.closest('.folder-btn');
       if (btn) toggleFolder(btn.dataset.folder);
     });
