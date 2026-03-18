@@ -160,6 +160,10 @@
             <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15"/></svg>
             New Group
           </button>
+          <button onclick="openTunnelModal()" class="flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-medium text-sky-400 bg-sky-400/[0.08] border border-sky-400/[0.2] rounded-lg hover:bg-sky-400/[0.14] hover:border-sky-400/40 transition-all duration-200">
+            <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M13.5 16.875h3.375m0 0h3.375m-3.375 0V13.5m0 3.375v3.375M6 10.5h2.25a2.25 2.25 0 002.25-2.25V6a2.25 2.25 0 00-2.25-2.25H6A2.25 2.25 0 003.75 6v2.25A2.25 2.25 0 006 10.5zm0 9.75h2.25A2.25 2.25 0 0010.5 18v-2.25a2.25 2.25 0 00-2.25-2.25H6a2.25 2.25 0 00-2.25 2.25V18A2.25 2.25 0 006 20.25zm9.75-9.75H18a2.25 2.25 0 002.25-2.25V6A2.25 2.25 0 0018 3.75h-2.25A2.25 2.25 0 0013.5 6v2.25a2.25 2.25 0 002.25 2.25z"/></svg>
+            SSH Tunnel
+          </button>
           <button onclick="openDrawer()" class="flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-medium text-neon bg-neon/[0.08] border border-neon/[0.2] rounded-lg hover:bg-neon/[0.14] hover:border-neon/40 transition-all duration-200">
             <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15"/></svg>
             Add Host
@@ -245,6 +249,103 @@
           <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15"/></svg>
           Create Group
         </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===================== SSH TUNNEL MODAL ===================== -->
+  <div id="tunnelModalBackdrop" class="hidden fixed inset-0 z-40 bg-ink-950/70 backdrop-blur-sm backdrop flex items-center justify-center p-6" onclick="closeTunnelModal()">
+    <div class="bg-ink-900 border border-ink-700/50 rounded-2xl shadow-2xl w-full max-w-lg drawer" onclick="event.stopPropagation()">
+
+      <!-- Header -->
+      <div class="flex items-center justify-between px-6 py-5 border-b border-ink-700/40">
+        <div>
+          <h2 class="font-display text-base font-semibold text-white">SSH Tunnel Generator</h2>
+          <p class="text-[11px] text-ink-500 mt-0.5">Build a port-forwarding command</p>
+        </div>
+        <button onclick="closeTunnelModal()" class="p-1.5 rounded-lg text-ink-500 hover:text-ink-200 hover:bg-ink-800/60 transition-all">
+          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
+        </button>
+      </div>
+
+      <!-- Body -->
+      <div class="px-6 py-5 space-y-4">
+
+        <!-- Tunnel type -->
+        <div>
+          <label class="form-label">Tunnel Type</label>
+          <div class="flex gap-2">
+            <button id="tTypeLocal" onclick="setTunnelType('local')" class="tunnel-type-btn flex-1 py-1.5 text-[11px] font-mono rounded-lg border transition-all duration-150 bg-sky-400/10 border-sky-400/40 text-sky-400">
+              -L Local
+            </button>
+            <button id="tTypeRemote" onclick="setTunnelType('remote')" class="tunnel-type-btn flex-1 py-1.5 text-[11px] font-mono rounded-lg border transition-all duration-150 bg-ink-800/60 border-ink-700/40 text-ink-400">
+              -R Remote
+            </button>
+            <button id="tTypeDynamic" onclick="setTunnelType('dynamic')" class="tunnel-type-btn flex-1 py-1.5 text-[11px] font-mono rounded-lg border transition-all duration-150 bg-ink-800/60 border-ink-700/40 text-ink-400">
+              -D Dynamic
+            </button>
+          </div>
+        </div>
+
+        <!-- Host search -->
+        <div class="relative">
+          <label class="form-label">SSH Host</label>
+          <input id="tHostSearch" class="form-input" placeholder="Search hosts…" autocomplete="off" oninput="filterTunnelHosts(this.value)">
+          <div id="tHostDropdown" class="hidden absolute z-10 w-full mt-1 bg-ink-900 border border-ink-700/50 rounded-xl shadow-xl max-h-44 overflow-y-auto"></div>
+          <input id="tHostSelected" type="hidden">
+          <p id="tHostSelectedLabel" class="hidden mt-1.5 flex items-center gap-1.5 text-[11px] text-neon font-mono">
+            <svg class="w-3 h-3 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5"/></svg>
+            <span id="tHostSelectedText"></span>
+          </p>
+        </div>
+
+        <!-- Ports row -->
+        <div id="tPortsRow" class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="form-label">Local Port</label>
+            <input id="tLocalPort" class="form-input" placeholder="e.g. 8080" type="number" min="1" max="65535" oninput="generateTunnelCmd()">
+          </div>
+          <div id="tRemotePortWrap">
+            <label class="form-label">Remote Port</label>
+            <input id="tRemotePort" class="form-input" placeholder="e.g. 3306" type="number" min="1" max="65535" oninput="generateTunnelCmd()">
+          </div>
+        </div>
+
+        <!-- Remote host (for -L and -R) -->
+        <div id="tRemoteHostWrap">
+          <label class="form-label">Remote Host <span class="text-ink-600 normal-case font-sans">(leave blank for localhost)</span></label>
+          <input id="tRemoteHost" class="form-input" placeholder="localhost" oninput="generateTunnelCmd()">
+        </div>
+
+        <!-- Extra flags -->
+        <div class="flex items-center gap-4">
+          <label class="flex items-center gap-2 cursor-pointer">
+            <input id="tFlagN" type="checkbox" class="w-3 h-3 accent-sky-400" onchange="generateTunnelCmd()">
+            <span class="text-[11px] text-ink-400 font-mono">-N (no command)</span>
+          </label>
+          <label class="flex items-center gap-2 cursor-pointer">
+            <input id="tFlagF" type="checkbox" class="w-3 h-3 accent-sky-400" onchange="generateTunnelCmd()">
+            <span class="text-[11px] text-ink-400 font-mono">-f (background)</span>
+          </label>
+        </div>
+
+        <!-- Generated command -->
+        <div id="tCmdWrap" class="hidden">
+          <label class="form-label">Generated Command</label>
+          <div class="relative group">
+            <pre id="tCmd" class="w-full bg-ink-950 border border-sky-400/20 rounded-xl px-4 py-3 text-[11px] text-sky-300 font-mono whitespace-pre-wrap break-all leading-relaxed pr-10"></pre>
+            <button onclick="copyTunnelCmd()" id="tCopyBtn" class="absolute top-2 right-2 p-1.5 rounded-lg text-sky-400/60 hover:text-sky-400 hover:bg-sky-400/10 transition-all" title="Copy to clipboard">
+              <svg id="tCopyIcon" class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M15.666 3.888A2.25 2.25 0 0013.5 2.25h-3c-1.03 0-1.9.693-2.166 1.638m7.332 0c.055.194.084.4.084.612v0a.75.75 0 01-.75.75H9a.75.75 0 01-.75-.75v0c0-.212.03-.418.084-.612m7.332 0c.646.049 1.288.11 1.927.184 1.1.128 1.907 1.077 1.907 2.185V19.5a2.25 2.25 0 01-2.25 2.25H6.75A2.25 2.25 0 014.5 19.5V6.257c0-1.108.806-2.057 1.907-2.185a48.208 48.208 0 011.927-.184"/></svg>
+              <svg id="tCheckIcon" class="w-4 h-4 hidden text-green-400" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5"/></svg>
+            </button>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- Footer -->
+      <div class="px-6 py-4 border-t border-ink-700/40 flex justify-end">
+        <button onclick="closeTunnelModal()" class="px-4 py-2 text-[11px] text-ink-400 border border-ink-700/40 rounded-lg hover:border-ink-600/60 hover:text-ink-200 transition-all duration-200">Close</button>
       </div>
     </div>
   </div>
@@ -809,6 +910,149 @@
       }
       if (e.key === '/' && document.activeElement !== s && document.getElementById('drawer').classList.contains('hidden')) {
         e.preventDefault(); s.focus();
+      }
+    });
+
+    // ---------------------------------------------------------------------------
+    // ---------------------------------------------------------------------------
+    // SSH Tunnel Modal
+    // ---------------------------------------------------------------------------
+    let tunnelType = 'local';
+
+    function openTunnelModal() {
+      tunnelType = 'local';
+      setTunnelType('local');
+      document.getElementById('tHostSearch').value = '';
+      document.getElementById('tHostSelected').value = '';
+      document.getElementById('tHostSelectedLabel').classList.add('hidden');
+      document.getElementById('tHostDropdown').classList.add('hidden');
+      document.getElementById('tLocalPort').value = '';
+      document.getElementById('tRemotePort').value = '';
+      document.getElementById('tRemoteHost').value = '';
+      document.getElementById('tFlagN').checked = false;
+      document.getElementById('tFlagF').checked = false;
+      document.getElementById('tCmdWrap').classList.add('hidden');
+      document.getElementById('tunnelModalBackdrop').classList.remove('hidden');
+      document.body.style.overflow = 'hidden';
+      setTimeout(() => document.getElementById('tHostSearch').focus(), 50);
+    }
+
+    function closeTunnelModal() {
+      document.getElementById('tunnelModalBackdrop').classList.add('hidden');
+      document.getElementById('tHostDropdown').classList.add('hidden');
+      document.body.style.overflow = '';
+    }
+
+    function setTunnelType(type) {
+      tunnelType = type;
+      const btns = { local: 'tTypeLocal', remote: 'tTypeRemote', dynamic: 'tTypeDynamic' };
+      Object.entries(btns).forEach(([t, id]) => {
+        const el = document.getElementById(id);
+        const active = t === type;
+        el.className = `tunnel-type-btn flex-1 py-1.5 text-[11px] font-mono rounded-lg border transition-all duration-150 ${
+          active ? 'bg-sky-400/10 border-sky-400/40 text-sky-400' : 'bg-ink-800/60 border-ink-700/40 text-ink-400'
+        }`;
+      });
+      // Dynamic mode hides remote port and remote host
+      const isDynamic = type === 'dynamic';
+      document.getElementById('tRemotePortWrap').classList.toggle('hidden', isDynamic);
+      document.getElementById('tRemoteHostWrap').classList.toggle('hidden', isDynamic);
+      // Resize ports row for dynamic
+      document.getElementById('tPortsRow').className = isDynamic
+        ? 'grid grid-cols-1 gap-3'
+        : 'grid grid-cols-2 gap-3';
+      generateTunnelCmd();
+    }
+
+    function filterTunnelHosts(q) {
+      const dropdown = document.getElementById('tHostDropdown');
+      const all = allGroups.flatMap(g => g.hosts);
+      const matches = q.trim()
+        ? all.filter(h =>
+            h.name.toLowerCase().includes(q.toLowerCase()) ||
+            h.hostname.toLowerCase().includes(q.toLowerCase())
+          )
+        : all;
+
+      if (!matches.length) {
+        dropdown.classList.add('hidden');
+        return;
+      }
+
+      dropdown.innerHTML = matches.slice(0, 30).map(h => `
+        <button type="button"
+          onclick="selectTunnelHost(${JSON.stringify(h.name)}, ${JSON.stringify(h.user)}, ${JSON.stringify(h.hostname)}, ${JSON.stringify(h.port || '22')}, ${JSON.stringify(h.identityFile || '')})"
+          class="w-full flex items-center gap-3 px-3 py-2 text-left hover:bg-ink-800/60 transition-colors first:rounded-t-xl last:rounded-b-xl">
+          <span class="text-[12px] font-medium text-white">${h.name}</span>
+          <span class="text-[11px] text-ink-500 font-mono">${h.hostname || ''}</span>
+          ${h.env ? `<span class="ml-auto text-[9px] font-mono font-semibold px-1.5 py-0.5 rounded border ${envBadgeClass(h.env)}">${h.env}</span>` : ''}
+        </button>`).join('');
+      dropdown.classList.remove('hidden');
+    }
+
+    function selectTunnelHost(name, user, hostname, port, identityFile) {
+      document.getElementById('tHostSelected').value = JSON.stringify({ name, user, hostname, port, identityFile });
+      document.getElementById('tHostSearch').value = name;
+      document.getElementById('tHostSelectedText').textContent = `${user ? user + '@' : ''}${hostname}${port !== '22' ? ':' + port : ''}`;
+      document.getElementById('tHostSelectedLabel').classList.remove('hidden');
+      document.getElementById('tHostDropdown').classList.add('hidden');
+      generateTunnelCmd();
+    }
+
+    function generateTunnelCmd() {
+      const wrap = document.getElementById('tCmdWrap');
+      const hostRaw = document.getElementById('tHostSelected').value;
+      if (!hostRaw) { wrap.classList.add('hidden'); return; }
+
+      const host = JSON.parse(hostRaw);
+      const localPort = document.getElementById('tLocalPort').value.trim();
+      const remotePort = document.getElementById('tRemotePort').value.trim();
+      const remoteHost = document.getElementById('tRemoteHost').value.trim() || 'localhost';
+      const flagN = document.getElementById('tFlagN').checked;
+      const flagF = document.getElementById('tFlagF').checked;
+
+      let parts = ['ssh'];
+      if (flagF) parts.push('-f');
+      if (flagN) parts.push('-N');
+      if (host.identityFile) parts.push(`-i ${host.identityFile}`);
+      if (host.port && host.port !== '22') parts.push(`-p ${host.port}`);
+
+      if (tunnelType === 'local') {
+        if (!localPort) { wrap.classList.add('hidden'); return; }
+        const rp = remotePort || localPort;
+        parts.push(`-L ${localPort}:${remoteHost}:${rp}`);
+      } else if (tunnelType === 'remote') {
+        if (!remotePort) { wrap.classList.add('hidden'); return; }
+        const lp = localPort || remotePort;
+        parts.push(`-R ${remotePort}:${remoteHost}:${lp}`);
+      } else {
+        if (!localPort) { wrap.classList.add('hidden'); return; }
+        parts.push(`-D ${localPort}`);
+      }
+
+      const target = host.user ? `${host.user}@${host.hostname}` : host.hostname;
+      parts.push(target);
+
+      document.getElementById('tCmd').textContent = parts.join(' ');
+      wrap.classList.remove('hidden');
+    }
+
+    function copyTunnelCmd() {
+      const cmd = document.getElementById('tCmd').textContent;
+      navigator.clipboard.writeText(cmd).then(() => {
+        document.getElementById('tCopyIcon').classList.add('hidden');
+        document.getElementById('tCheckIcon').classList.remove('hidden');
+        setTimeout(() => {
+          document.getElementById('tCopyIcon').classList.remove('hidden');
+          document.getElementById('tCheckIcon').classList.add('hidden');
+        }, 1500);
+      });
+    }
+
+    // Close host dropdown when clicking outside
+    document.addEventListener('click', e => {
+      if (!e.target.closest('#tHostSearch') && !e.target.closest('#tHostDropdown')) {
+        document.getElementById('tHostDropdown')?.classList.add('hidden');
       }
     });
 

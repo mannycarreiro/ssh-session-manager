@@ -19,11 +19,52 @@ A searchable web UI for your SSH config, served locally via a lightweight Python
 - **Group/folder view** — one folder per config file, collapsible
 - **Full CRUD** — add, edit, and delete hosts directly from the UI
 - **New Group** — create new config file groups from the UI
+- **SSH Tunnel Generator** — build `-L`, `-R`, and `-D` port-forwarding commands with live preview and one-click copy
 - **URL badges** — clickable link buttons per host (e.g. Grafana, Kibana)
-- **ENV badges** — color-coded environment labels (PROD, DEV, PAT, etc.)
+- **ENV badges** — color-coded environment labels (PROD, DEV, SIT, PAT, etc.)
 - **Copy hostname** button and direct SSH/SFTP protocol links per row
 - **Dark/light theme** toggle
 - **Template files ignored** — `.template` files in the config directory are never loaded
+
+---
+
+## SSH Tunnel Generator
+
+Click the **SSH Tunnel** button in the header to open the tunnel command builder.
+
+### Fields
+
+| Field | Description |
+|-------|-------------|
+| Tunnel Type | `-L` Local, `-R` Remote, or `-D` Dynamic (SOCKS proxy) |
+| SSH Host | Search and select from your existing host list |
+| Local Port | Port on your local machine |
+| Remote Port | Port on the remote side (`-L`/`-R` only) |
+| Remote Host | Intermediate host to forward to (default: `localhost`) |
+| `-N` flag | Do not execute a remote command (tunnel only) |
+| `-f` flag | Send SSH to background after authentication |
+
+### Tunnel Types
+
+**Local (`-L`)** — Access a remote service locally:
+```bash
+ssh -N -L 8080:localhost:3306 user@jumphost
+# Access remote MySQL at localhost:8080
+```
+
+**Remote (`-R`)** — Expose a local port on the remote server:
+```bash
+ssh -N -R 9090:localhost:3000 user@server
+# Remote server can reach your local app at localhost:9090
+```
+
+**Dynamic (`-D`)** — SOCKS5 proxy through the SSH host:
+```bash
+ssh -N -D 1080 user@server
+# Route traffic through server via SOCKS5 at localhost:1080
+```
+
+The generated command updates live as you fill in fields and can be copied to the clipboard with one click.
 
 ---
 
