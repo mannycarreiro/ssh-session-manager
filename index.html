@@ -255,7 +255,7 @@
 
   <!-- ===================== SSH TUNNEL MODAL ===================== -->
   <div id="tunnelModalBackdrop" class="hidden fixed inset-0 z-40 bg-ink-950/70 backdrop-blur-sm backdrop flex items-center justify-center p-6" onclick="closeTunnelModal()">
-    <div class="bg-ink-900 border border-ink-700/50 rounded-2xl shadow-2xl w-full max-w-lg drawer" onclick="event.stopPropagation()">
+    <div class="bg-ink-900 border border-ink-700/50 rounded-2xl shadow-2xl w-full max-w-lg drawer" onclick="event.stopPropagation()" style="overflow:visible">
 
       <!-- Header -->
       <div class="flex items-center justify-between px-6 py-5 border-b border-ink-700/40">
@@ -288,10 +288,12 @@
         </div>
 
         <!-- Host search -->
-        <div class="relative">
+        <div class="relative" id="tHostSearchWrap">
           <label class="form-label">SSH Host</label>
-          <input id="tHostSearch" class="form-input" placeholder="Search hosts…" autocomplete="off" oninput="filterTunnelHosts(this.value)">
-          <div id="tHostDropdown" class="hidden absolute z-10 w-full mt-1 bg-ink-900 border border-ink-700/50 rounded-xl shadow-xl max-h-44 overflow-y-auto"></div>
+          <input id="tHostSearch" class="form-input" placeholder="Search hosts…" autocomplete="off"
+            oninput="filterTunnelHosts(this.value)"
+            onfocus="filterTunnelHosts(this.value)">
+          <div id="tHostDropdown" class="hidden absolute z-50 w-full mt-1 bg-ink-900 border border-ink-700/50 rounded-xl shadow-2xl max-h-52 overflow-y-auto" style="z-index:9999"></div>
           <input id="tHostSelected" type="hidden">
           <p id="tHostSelectedLabel" class="hidden mt-1.5 flex items-center gap-1.5 text-[11px] text-neon font-mono">
             <svg class="w-3 h-3 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5"/></svg>
@@ -979,14 +981,17 @@
         return;
       }
 
-      dropdown.innerHTML = matches.slice(0, 30).map(h => `
+      dropdown.innerHTML = matches.slice(0, 30).map((h, i) => `
         <button type="button"
-          onclick="selectTunnelHost(${JSON.stringify(h.name)}, ${JSON.stringify(h.user)}, ${JSON.stringify(h.hostname)}, ${JSON.stringify(h.port || '22')}, ${JSON.stringify(h.identityFile || '')})"
-          class="w-full flex items-center gap-3 px-3 py-2 text-left hover:bg-ink-800/60 transition-colors first:rounded-t-xl last:rounded-b-xl">
-          <span class="text-[12px] font-medium text-white">${h.name}</span>
-          <span class="text-[11px] text-ink-500 font-mono">${h.hostname || ''}</span>
-          ${h.env ? `<span class="ml-auto text-[9px] font-mono font-semibold px-1.5 py-0.5 rounded border ${envBadgeClass(h.env)}">${h.env}</span>` : ''}
+          data-tidx="${i}"
+          class="tunnel-host-item w-full flex items-center gap-3 px-3 py-2 text-left hover:bg-ink-800/60 transition-colors first:rounded-t-xl last:rounded-b-xl">
+          <span class="text-[12px] font-medium text-white pointer-events-none">${esc(h.name)}</span>
+          <span class="text-[11px] text-ink-500 font-mono pointer-events-none">${esc(h.hostname || '')}</span>
+          ${h.env ? `<span class="ml-auto text-[9px] font-mono font-semibold px-1.5 py-0.5 rounded border pointer-events-none ${envBadgeClass(h.env)}">${esc(h.env)}</span>` : ''}
         </button>`).join('');
+
+      // Store match data on dropdown element so handler can look it up by index
+      dropdown._matches = matches;
       dropdown.classList.remove('hidden');
     }
 
@@ -1049,10 +1054,22 @@
       });
     }
 
-    // Close host dropdown when clicking outside
-    document.addEventListener('click', e => {
-      if (!e.target.closest('#tHostSearch') && !e.target.closest('#tHostDropdown')) {
-        document.getElementById('tHostDropdown')?.classList.add('hidden');
+    // Tunnel dropdown — delegated mousedown on the dropdown container itself
+    document.getElementById('tHostDropdown').addEventListener('mousedown', e => {
+      e.preventDefault(); // prevent input blur
+      const btn = e.target.closest('.tunnel-host-item');
+      if (!btn) return;
+      const idx = parseInt(btn.dataset.tidx, 10);
+      const dropdown = document.getElementById('tHostDropdown');
+      const h = dropdown._matches[idx];
+      if (h) selectTunnelHost(h.name, h.user, h.hostname, h.port || '22', h.identityFile || '');
+    });
+
+    // Hide dropdown when clicking outside the search+dropdown area
+    document.addEventListener('mousedown', e => {
+      const wrap = document.getElementById('tHostSearchWrap');
+      if (wrap && !wrap.contains(e.target)) {
+        document.getElementById('tHostDropdown').classList.add('hidden');
       }
     });
 
