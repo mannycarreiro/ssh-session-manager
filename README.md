@@ -10,6 +10,7 @@ A searchable web UI for your SSH config, served locally via a lightweight Python
 | `index.html` | Frontend: searchable web UI (HTML, CSS, JS) |
 | `ssh-session-manager.sh` | macOS wrapper to manage the server as a background process |
 | `com.local.ssh-session-manager.plist` | macOS LaunchAgent for auto-start on login |
+| `fssh` | Terminal CLI: fuzzy-search your hosts (with comments) and connect via `ssh` |
 
 ---
 
@@ -153,6 +154,40 @@ Host ansible
 # Open in your browser
 ./ssh-session-manager.sh open
 ```
+
+---
+
+## `fssh` — Fuzzy-search & connect from the terminal
+
+`fssh` is a standalone CLI (no server needed) that reuses the same config parser as
+`ssh-session-manager.py`. It lists every host through [`fzf`](https://github.com/junegunn/fzf),
+alias on the left and group/target/ENV/comments on the right, and `ssh`s into whatever you pick.
+
+```bash
+# One-time setup: put fssh on PATH and install fzf if needed
+brew install fzf
+ln -sf "$(pwd)/fssh" /opt/homebrew/bin/fssh   # or anywhere already on your PATH
+```
+
+```
+HOST                 FILE     USER@HOST:PORT                            ENV   COMMENTS
+ansible              Ansible  manny@ansible-master.home.example.com:22        Ansible Controller
+pihole               LabVms   manny@pihole-1.home.example.com:22        PROD  Pi-Hole DNS Server
+pitest               LabVms   manny@pitest.home.example.com:22          DEV   PiTest Test Server
+vultr-rocky-1        vultr    root@45.63.23.216:22                      PROD  Rocky 10 New Jersey [cloud-vultr-rocky-1nj]
+```
+
+Type to fuzzy-filter across alias, file, target, ENV, and description/URL comments — press
+Enter to `ssh` into the highlighted host, or Esc to cancel.
+
+```
+fssh                  fuzzy-pick a host and connect
+fssh <query>          pre-fill the fzf search query
+fssh -e, --env NAME   only show hosts whose ENV matches NAME (case-insensitive)
+fssh -p, --print      print the resolved `ssh` command instead of running it
+```
+
+Respects the same `SSH_CONFIG_DIR` environment variable as the server.
 
 ---
 

@@ -1,0 +1,178 @@
+#!/usr/bin/env python3
+"""
+fssh — fuzzy-search your SSH config and connect.
+
+Reuses the parser from ssh-session-manager.py to read the same
+SSH_CONFIG_DIR, lists every host through fzf (alias on the left,
+user@host:port / ENV badge / description+URL comments on the right),
+and execs `ssh <alias>` on selection.
+
+Usage:
+    fssh                  fuzzy-pick a host and connect
+    fssh <query>          pre-fill the fzf search query
+    fssh -p, --print      print the resolved `ssh` command instead of running it
+    fssh -e, --env NAME   only show hosts whose ENV matches NAME (case-insensitive)
+    fssh -h, --help       show this help
+
+Environment variables (same as ssh-session-manager.py):
+    SSH_CONFIG_DIR  — path to SSH config file or directory (default: ~/.ssh/config.d)
+"""
+
+import os
+import re
+import sys
+import shutil
+import argparse
+import importlib.util
+import subprocess
+from pathlib import Path
+
+# ---------------------------------------------------------------------------
+# Locate and import ssh-session-manager.py — resolves symlinks first, the
+# same way ssh-session-manager.sh does, so `fssh` can be symlinked onto PATH.
+# ---------------------------------------------------------------------------
+
+def _real_script_path() -> Path:
+    p = Path(__file__)
+    while p.is_symlink():
+        target = Path(os.readlink(p))
+        p = target if target.is_absolute() else (p.parent / target)
+    return p.resolve()
+
+SCRIPT_DIR = _real_script_path().parent
+_spec = importlib.util.spec_from_file_location("ssh_session_manager", SCRIPT_DIR / "ssh-session-manager.py")
+if _spec is None or _spec.loader is None:
+    sys.exit(f"fssh: could not find ssh-session-manager.py next to {SCRIPT_DIR}")
+ssm = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(ssm)
+
+# ---------------------------------------------------------------------------
+# Colors
+# ---------------------------------------------------------------------------
+
+RESET, BOLD, DIM = "\033[0m", "\033[1m", "\033[2m"
+CYAN, WHITE, GREY = "\033[36m", "\033[37m", "\033[90m"
+
+_ANSI_RE = re.compile(r"\033\[[0-9;]*m")
+
+
+def strip_ansi(s: str) -> str:
+    return _ANSI_RE.sub("", s)
+
+ENV_COLORS = [
+    (re.compile(r"^DEV", re.I), "\033[32m"),        # green
+    (re.compile(r"^SIT", re.I), "\033[38;5;208m"),  # orange
+    (re.compile(r"^(PAT|DRT)", re.I), "\033[33m"),  # yellow
+    (re.compile(r"^(PROD|DRP)", re.I), "\033[31m"), # red
+]
+
+
+def env_color(env: str) -> str:
+    for pattern, color in ENV_COLORS:
+        if pattern.match(env):
+            return color
+    return GREY
+
+
+# ---------------------------------------------------------------------------
+# Build the fzf listing
+# ---------------------------------------------------------------------------
+
+def build_rows(env_filter: str | None):
+    groups = ssm.load_hosts_grouped()
+    flat = []
+    for g in groups:
+        for h in g["hosts"]:
+            if env_filter and h.get("env", "").lower() != env_filter.lower():
+                continue
+            flat.append((g["file"], h))
+    flat.sort(key=lambda fh: fh[1]["name"].lower())
+    if not flat:
+        return [], {}
+
+    name_w = max(len(h["name"]) for _, h in flat)
+    file_w = max(len(f) for f, _ in flat)
+    target_w = max((len(f"{h['user']}@{h['hostname']}:{h['port']}") for _, h in flat if h["hostname"]), default=0)
+    env_w = max((len(h.get("env", "")) for _, h in flat), default=0)
+
+    rows = []
+    alias_by_line = {}
+    for file, h in flat:
+        alias = h["name"]
+        target = f"{h['user']}@{h['hostname']}:{h['port']}" if h["hostname"] else ""
+        env = h.get("env", "")
+        desc = h.get("description", "")
+        urls = ", ".join(u["name"] for u in h.get("urls", []))
+        comments = " · ".join(x for x in [desc, f"[{urls}]" if urls else ""] if x)
+
+        line = (
+            f"{BOLD}{CYAN}{alias:<{name_w}}{RESET}  "
+            f"{DIM}{file:<{file_w}}{RESET}  "
+            f"{WHITE}{target:<{target_w}}{RESET}  "
+            f"{env_color(env)}{env:<{env_w}}{RESET}  "
+            f"{GREY}{comments}{RESET}"
+        )
+        rows.append(line)
+        alias_by_line[strip_ansi(line)] = alias
+
+    header = (
+        f"{'HOST':<{name_w}}  {'FILE':<{file_w}}  {'USER@HOST:PORT':<{target_w}}  "
+        f"{'ENV':<{env_w}}  COMMENTS"
+    )
+    return rows, alias_by_line, header
+
+
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
+
+def main():
+    parser = argparse.ArgumentParser(prog="fssh", add_help=False)
+    parser.add_argument("query", nargs="?", default="")
+    parser.add_argument("-e", "--env", default=None)
+    parser.add_argument("-p", "--print", dest="print_only", action="store_true")
+    parser.add_argument("-h", "--help", action="store_true")
+    args = parser.parse_args()
+
+    if args.help:
+        print(__doc__.strip())
+        return 0
+
+    if shutil.which("fzf") is None:
+        sys.exit("fssh: fzf is not installed. Install it with `brew install fzf`.")
+
+    rows, alias_by_line, header = build_rows(args.env)
+    if not rows:
+        where = args.env and f" matching ENV '{args.env}'" or ""
+        print(f"No SSH hosts found{where} in {ssm.CONFIG_DIR}", file=sys.stderr)
+        return 1
+
+    fzf_cmd = [
+        "fzf",
+        "--ansi",
+        "--reverse",
+        "--height=90%",
+        "--border",
+        "--prompt=ssh> ",
+        f"--header={header}",
+        "--header-first",
+        "--query", args.query,
+    ]
+    result = subprocess.run(fzf_cmd, input="\n".join(rows), capture_output=True, text=True)
+    selection = result.stdout.strip("\n")
+    if result.returncode != 0 or not selection:
+        return 130  # cancelled (Esc / Ctrl-C)
+
+    alias = alias_by_line.get(selection)
+    if alias is None:
+        sys.exit("fssh: could not resolve selection to a host")
+
+    if args.print_only:
+        print(f"ssh {alias}")
+        return 0
+
+    os.execvp("ssh", ["ssh", alias])
+
+
+if __name__ == "__main__":
+    sys.exit(main())
